@@ -77,7 +77,6 @@ class MicroVelocityAnalyzer:
         self.max_block_number = max(self.max_block_number, block_number)
 
     def calculate_velocities(self):
-        self.LIMIT = self.max_block_number - self.min_block_number + 1
         for address in self.accounts.keys():
             if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
                 self._calculate_individual_velocity(address)
@@ -132,7 +131,9 @@ class MicroVelocityAnalyzer:
         print ("Computing interval of ", self.save_every_n, " blocks")
         print(f"Min block number: {self.min_block_number}")
         print(f"Max block number: {self.max_block_number}")
-        print(f"Number of blocks: {self.LIMIT}")
+        self.LIMIT = self.max_block_number - self.min_block_number + 1
+
+        print(f"Number of blocks considered: {self.LIMIT}")
         print("Calculating velocities...")
         self.calculate_velocities()
         print("Calculating balances...")
