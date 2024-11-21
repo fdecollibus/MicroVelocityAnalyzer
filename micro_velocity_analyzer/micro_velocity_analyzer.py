@@ -3,6 +3,7 @@ import os
 import pickle
 import numpy as np
 import csv
+from tqdm import tqdm
 
 class MicroVelocityAnalyzer:
     def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1):
@@ -26,7 +27,7 @@ class MicroVelocityAnalyzer:
     def load_allocated_data(self):
         with open(self.allocated_file, 'r') as file:
             reader = csv.DictReader(file)
-            for line in reader:
+            for line in tqdm(reader):
                 self._process_allocation(line)
 
     def _process_allocation(self, line):
@@ -48,7 +49,7 @@ class MicroVelocityAnalyzer:
     def load_transfer_data(self):
         with open(self.transfers_file, 'r') as file:
             reader = csv.DictReader(file)
-            for line in reader:
+            for line in tqdm(reader):
                 self._process_transfer(line)
 
     def _process_transfer(self, line):
@@ -77,7 +78,7 @@ class MicroVelocityAnalyzer:
         self.max_block_number = max(self.max_block_number, block_number)
 
     def calculate_velocities(self):
-        for address in self.accounts.keys():
+        for address in tqdm(self.accounts.keys()):
             if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
                 self._calculate_individual_velocity(address)
 
@@ -87,7 +88,7 @@ class MicroVelocityAnalyzer:
         arranged_keys[1].sort()
         ind_velocity = np.zeros(self.LIMIT)
 
-        for border in arranged_keys[1]:
+        for border in tqdm(arranged_keys[1], leave=False):
             arranged_keys[0] = list(self.accounts[address][0].keys())
             test = np.array(arranged_keys[0])
 
@@ -95,23 +96,23 @@ class MicroVelocityAnalyzer:
                 counter = test[test < border][(len(test[test < border]) - 1) - i]
                 if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
                     ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
-                    print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
+                    #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
                     self.accounts[address][0][counter] -= self.accounts[address][1][border]
                     self.accounts[address][1].pop(border)
                     break
                 else:
                     ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
-                    print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
+                    #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
                     self.accounts[address][1][border] -= self.accounts[address][0][counter]
                     self.accounts[address][0].pop(counter)
         # Save only every Nth position of the array
         self.velocities[address] = ind_velocity[::self.save_every_n]
 
     def calculate_balances(self):
-        for address in self.accounts.keys():
+        for address in tqdm(self.accounts.keys()):
             balance = 0
             balances = np.zeros(self.LIMIT)
-            for block_number in range(self.min_block_number, self.max_block_number + 1):
+            for block_number in tqdm(range(self.min_block_number, self.max_block_number + 1), leave=False):
                 if block_number in self.accounts[address][0]:
                     balance += self.accounts[address][0][block_number]
                 if block_number in self.accounts[address][1]:
