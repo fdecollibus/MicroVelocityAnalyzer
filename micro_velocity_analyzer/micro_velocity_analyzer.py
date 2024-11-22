@@ -193,7 +193,8 @@ class MicroVelocityAnalyzer:
                     balance += self.accounts[address][0][block_number]
                 if block_number in self.accounts[address][1]:
                     balance -= self.accounts[address][1][block_number]
-                balances[block_number - self.min_block_number] = balance
+                if block_number % self.save_every_n == 0:
+                    balances[block_number - self.min_block_number] = balance
             # Save only every Nth position of the array
             self.balances[address] = balances[::self.save_every_n]
 
