@@ -106,7 +106,7 @@ class MicroVelocityAnalyzer:
                         continue
                     else:
                         #ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
-                        ind_velocity[idx_range] += (self.accounts[address][1][border]) / (border - counter)
+                        ind_velocity[idx_range[1:]] += (self.accounts[address][1][border]) / (border - counter)
                         #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
                         self.accounts[address][0][counter] -= self.accounts[address][1][border]
                         self.accounts[address][1].pop(border)
@@ -119,7 +119,7 @@ class MicroVelocityAnalyzer:
                         continue
                     else:
                         #ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
-                        ind_velocity[idx_range] += (self.accounts[address][0][counter]) / (border - counter)
+                        ind_velocity[idx_range[1:]] += (self.accounts[address][0][counter]) / (border - counter)
                         #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
                         self.accounts[address][1][border] -= self.accounts[address][0][counter]
                         self.accounts[address][0].pop(counter)
