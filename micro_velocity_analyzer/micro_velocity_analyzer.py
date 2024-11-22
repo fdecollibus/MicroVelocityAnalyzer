@@ -200,7 +200,7 @@ class MicroVelocityAnalyzer:
 
     def save_results(self):
         with open(self.output_file, 'wb') as file:
-            pickle.dump([self.accounts, self.velocities, self.balances], file)
+            pickle.dump([self.velocities, self.balances], file)
 
     def run_analysis(self):
         print("Loading allocated data...",  self.allocated_file)
