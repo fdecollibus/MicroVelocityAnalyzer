@@ -134,7 +134,7 @@ class MicroVelocityAnalyzer:
 
         # Process chunks in parallel
         with ProcessPoolExecutor() as executor:
-            futures = [executor.submit(self._process_chunk, chunk) for chunk in chunks]
+            futures = [executor.submit(self._process_chunk, chunk, i) for i,chunk in enumerate(chunks)]
             
             # Collect results
             for future in tqdm(futures):
@@ -142,9 +142,9 @@ class MicroVelocityAnalyzer:
                 self.velocities.update(chunk_results)
 
     # Helper function to process chunks
-    def _process_chunk(self, addresses):
+    def _process_chunk(self, addresses, i):
         results = {}
-        for address in tqdm(addresses, position=1, leave=False):
+        for address in tqdm(addresses, position=i, leave=False):
             if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
                 arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
                 arranged_keys[0].sort()
