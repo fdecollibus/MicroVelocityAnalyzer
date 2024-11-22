@@ -4,13 +4,15 @@ import pickle
 import numpy as np
 import csv
 from tqdm import tqdm
+from multiprocessing import Pool,Manager
 
 class MicroVelocityAnalyzer:
-    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1):
+    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1):
         self.allocated_file = allocated_file
         self.transfers_file = transfers_file
         self.output_file = output_file
         self.save_every_n = save_every_n
+        self.n_cores = n_cores
         self.accounts = {}
         self.min_block_number = float('inf')
         self.max_block_number = float('-inf')
@@ -23,6 +25,8 @@ class MicroVelocityAnalyzer:
         output_folder = os.path.dirname(self.output_file)
         if output_folder and not os.path.exists(output_folder):
             os.makedirs(output_folder)
+    
+
 
     def load_allocated_data(self):
         with open(self.allocated_file, 'r') as file:
@@ -82,6 +86,49 @@ class MicroVelocityAnalyzer:
             if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
                 self._calculate_individual_velocity(address)
 
+    def calculate_velocities_parallel(self):
+        # Helper function to process chunks
+        def process_chunk(addresses):
+            results = {}
+            for address in addresses:
+                if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
+                    arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
+                    arranged_keys[0].sort()
+                    arranged_keys[1].sort()
+                    ind_velocity = np.zeros(self.LIMIT)
+
+                    for border in arranged_keys[1]:
+                        arranged_keys[0] = list(self.accounts[address][0].keys())
+                        test = np.array(arranged_keys[0])
+
+                        for i in range(0, len(test[test < border])):
+                            counter = test[test < border][(len(test[test < border]) - 1) - i]
+                            if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
+                                ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
+                                self.accounts[address][0][counter] -= self.accounts[address][1][border]
+                                self.accounts[address][1].pop(border)
+                                break
+                            else:
+                                ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
+                                self.accounts[address][1][border] -= self.accounts[address][0][counter]
+                                self.accounts[address][0].pop(counter)
+                    results[address] = ind_velocity[::self.save_every_n]
+            return results
+
+        # Split addresses into chunks
+        addresses = list(self.accounts.keys())
+        chunk_size = max(1, len(addresses) // (os.cpu_count() or 1))
+        chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
+
+        # Process chunks in parallel
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(process_chunk, chunk) for chunk in chunks]
+            
+            # Collect results
+            for future in tqdm(futures):
+                chunk_results = future.result()
+                self.velocities.update(chunk_results)
+
     def _calculate_individual_velocity(self, address):
         arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
         arranged_keys[0].sort()
@@ -137,7 +184,10 @@ class MicroVelocityAnalyzer:
 
         print(f"Number of blocks considered: {self.LIMIT}")
         print("Calculating velocities...")
-        self.calculate_velocities()
+        if self.n_cores == 1:
+            self.calculate_velocities()
+        else:
+            self.calculate_velocities_parallel()
         print("Calculating balances...")
         self.calculate_balances()
         print("Saving results...")
@@ -150,13 +200,15 @@ def main():
     parser.add_argument('--transfers_file', type=str, default='sampledata/sample_transfers.csv', help='Path to the transfers CSV file')
     parser.add_argument('--output_file', type=str, default='sampledata/general_velocities.pickle', help='Path to the output file')
     parser.add_argument('--save_every_n', type=int, default=1, help='Save every Nth position of the velocity array')
+    parser.add_argument('--n_cores', type=int, default=1, help='Number of cores to use')
     args = parser.parse_args()
 
     analyzer = MicroVelocityAnalyzer(
         allocated_file=args.allocated_file,
         transfers_file=args.transfers_file,
         output_file=args.output_file,
-        save_every_n=args.save_every_n
+        save_every_n=args.save_every_n,
+        n_cores=args.n_cores
     )
     analyzer.run_analysis()
 
