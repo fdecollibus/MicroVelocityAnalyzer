@@ -94,7 +94,7 @@ class MicroVelocityAnalyzer:
 
         for border in tqdm(arranged_keys[1], leave=False):
             arranged_keys[0] = list(self.accounts[address][0].keys())
-            test = np.array(arranged_keys[0])
+            test = np.array(arranged_keys[0].sort())
 
             for i in range(0, len(test[test < border])):
                 counter = test[test < border][(len(test[test < border]) - 1) - i]
@@ -116,7 +116,6 @@ class MicroVelocityAnalyzer:
                     if len(idx_range) == 1:
                         self.accounts[address][1][border] -= self.accounts[address][0][counter]
                         self.accounts[address][0].pop(counter)
-                        continue
                     else:
                         #ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
                         ind_velocity[idx_range[1:]] += (self.accounts[address][0][counter]) / (border - counter)
@@ -154,21 +153,34 @@ class MicroVelocityAnalyzer:
 
                 for border in arranged_keys[1]:
                     arranged_keys[0] = list(self.accounts[address][0].keys())
-                    test = np.array(arranged_keys[0])
+                    test = np.array(arranged_keys[0].sort())
 
                     for i in range(0, len(test[test < border])):
                         counter = test[test < border][(len(test[test < border]) - 1) - i]
                         if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
                             idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
-                            ind_velocity[idx_range] += (self.accounts[address][1][border]) / (border - counter)
-                            self.accounts[address][0][counter] -= self.accounts[address][1][border]
-                            self.accounts[address][1].pop(border)
-                            break
+                            if len(idx_range) == 1:
+                                self.accounts[address][0][counter] -= self.accounts[address][1][border]
+                                self.accounts[address][1].pop(border)
+                                break
+                            else:
+                                #ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
+                                ind_velocity[idx_range[1:]] += (self.accounts[address][1][border]) / (border - counter)
+                                #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
+                                self.accounts[address][0][counter] -= self.accounts[address][1][border]
+                                self.accounts[address][1].pop(border)
+                                break
                         else:
                             idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
-                            ind_velocity[idx_range] += (self.accounts[address][0][counter]) / (border - counter)
-                            self.accounts[address][1][border] -= self.accounts[address][0][counter]
-                            self.accounts[address][0].pop(counter)
+                            if len(idx_range) == 1:
+                                self.accounts[address][1][border] -= self.accounts[address][0][counter]
+                                self.accounts[address][0].pop(counter)
+                            else:
+                                #ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
+                                ind_velocity[idx_range[1:]] += (self.accounts[address][0][counter]) / (border - counter)
+                                #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
+                                self.accounts[address][1][border] -= self.accounts[address][0][counter]
+                                self.accounts[address][0].pop(counter)
                 results[address] = ind_velocity#[::self.save_every_n]
         return results
 
