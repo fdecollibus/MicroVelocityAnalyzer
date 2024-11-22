@@ -86,49 +86,6 @@ class MicroVelocityAnalyzer:
             if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
                 self._calculate_individual_velocity(address)
 
-    def calculate_velocities_parallel(self):
-        # Helper function to process chunks
-        def process_chunk(addresses):
-            results = {}
-            for address in addresses:
-                if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
-                    arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
-                    arranged_keys[0].sort()
-                    arranged_keys[1].sort()
-                    ind_velocity = np.zeros(self.LIMIT)
-
-                    for border in arranged_keys[1]:
-                        arranged_keys[0] = list(self.accounts[address][0].keys())
-                        test = np.array(arranged_keys[0])
-
-                        for i in range(0, len(test[test < border])):
-                            counter = test[test < border][(len(test[test < border]) - 1) - i]
-                            if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
-                                ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
-                                self.accounts[address][0][counter] -= self.accounts[address][1][border]
-                                self.accounts[address][1].pop(border)
-                                break
-                            else:
-                                ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
-                                self.accounts[address][1][border] -= self.accounts[address][0][counter]
-                                self.accounts[address][0].pop(counter)
-                    results[address] = ind_velocity[::self.save_every_n]
-            return results
-
-        # Split addresses into chunks
-        addresses = list(self.accounts.keys())
-        chunk_size = max(1, len(addresses) // (os.cpu_count() or 1))
-        chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
-
-        # Process chunks in parallel
-        with ProcessPoolExecutor() as executor:
-            futures = [executor.submit(process_chunk, chunk) for chunk in chunks]
-            
-            # Collect results
-            for future in tqdm(futures):
-                chunk_results = future.result()
-                self.velocities.update(chunk_results)
-
     def _calculate_individual_velocity(self, address):
         arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
         arranged_keys[0].sort()
@@ -154,6 +111,50 @@ class MicroVelocityAnalyzer:
                     self.accounts[address][0].pop(counter)
         # Save only every Nth position of the array
         self.velocities[address] = ind_velocity[::self.save_every_n]
+
+    def calculate_velocities_parallel(self):
+
+        # Split addresses into chunks
+        addresses = list(self.accounts.keys())
+        chunk_size = max(1, len(addresses) // self.n_cores)
+        chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
+
+        # Process chunks in parallel
+        with ProcessPoolExecutor() as executor:
+            futures = [executor.submit(process_chunk, chunk) for chunk in chunks]
+            
+            # Collect results
+            for future in tqdm(futures):
+                chunk_results = future.result()
+                self.velocities.update(chunk_results)
+
+    # Helper function to process chunks
+    def process_chunk(addresses):
+        results = {}
+        for address in addresses:
+            if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
+                arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
+                arranged_keys[0].sort()
+                arranged_keys[1].sort()
+                ind_velocity = np.zeros(self.LIMIT)
+
+                for border in arranged_keys[1]:
+                    arranged_keys[0] = list(self.accounts[address][0].keys())
+                    test = np.array(arranged_keys[0])
+
+                    for i in range(0, len(test[test < border])):
+                        counter = test[test < border][(len(test[test < border]) - 1) - i]
+                        if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
+                            ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
+                            self.accounts[address][0][counter] -= self.accounts[address][1][border]
+                            self.accounts[address][1].pop(border)
+                            break
+                        else:
+                            ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
+                            self.accounts[address][1][border] -= self.accounts[address][0][counter]
+                            self.accounts[address][0].pop(counter)
+                results[address] = ind_velocity[::self.save_every_n]
+        return results
 
     def calculate_balances(self):
         for address in tqdm(self.accounts.keys()):
