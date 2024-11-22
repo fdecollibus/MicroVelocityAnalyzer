@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import csv
 from tqdm import tqdm
-from multiprocessing import Pool,Manager
+from concurrent.futures import ProcessPoolExecutor
 
 class MicroVelocityAnalyzer:
     def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1):
