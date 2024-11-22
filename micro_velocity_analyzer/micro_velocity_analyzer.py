@@ -131,7 +131,7 @@ class MicroVelocityAnalyzer:
     # Helper function to process chunks
     def _process_chunk(self, addresses):
         results = {}
-        for address in addresses:
+        for address in tqdm(addresses, position=1, leave=False):
             if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
                 arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
                 arranged_keys[0].sort()
