@@ -153,7 +153,7 @@ class MicroVelocityAnalyzer:
 
                 for border in arranged_keys[1]:
                     arranged_keys[0] = list(self.accounts[address][0].keys())
-                    test = np.array(arranged_keys[0].sort())
+                    test = np.array(arranged_keys[0])
 
                     for i in range(0, len(test[test < border])):
                         counter = test[test < border][(len(test[test < border]) - 1) - i]
