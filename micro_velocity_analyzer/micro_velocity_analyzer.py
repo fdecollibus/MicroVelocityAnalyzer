@@ -99,18 +99,22 @@ class MicroVelocityAnalyzer:
             for i in range(0, len(test[test < border])):
                 counter = test[test < border][(len(test[test < border]) - 1) - i]
                 if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
-                    ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
+                    idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
+                    #ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
+                    ind_velocity[idx_range] += (self.accounts[address][1][border]) / (border - counter)
                     #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
                     self.accounts[address][0][counter] -= self.accounts[address][1][border]
                     self.accounts[address][1].pop(border)
                     break
                 else:
-                    ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
+                    idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
+                    #ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
+                    ind_velocity[idx_range] += (self.accounts[address][0][counter]) / (border - counter)
                     #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
                     self.accounts[address][1][border] -= self.accounts[address][0][counter]
                     self.accounts[address][0].pop(counter)
         # Save only every Nth position of the array
-        self.velocities[address] = ind_velocity[::self.save_every_n]
+        self.velocities[address] = ind_velocity#[::self.save_every_n]
 
     def calculate_velocities_parallel(self):
 
@@ -181,7 +185,7 @@ class MicroVelocityAnalyzer:
         print ("Computing interval of ", self.save_every_n, " blocks")
         print(f"Min block number: {self.min_block_number}")
         print(f"Max block number: {self.max_block_number}")
-        self.LIMIT = self.max_block_number - self.min_block_number + 1
+        self.LIMIT = (self.max_block_number - self.min_block_number)//self.save_every_n + 1
 
         print(f"Number of blocks considered: {self.LIMIT}")
         print("Calculating velocities...")
