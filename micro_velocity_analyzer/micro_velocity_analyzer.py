@@ -1,9 +1,11 @@
 import argparse
 import os
 import pickle
-import numpy as np
-import csv
-from tqdm import tqdm
+from pyspark.sql import SparkSession
+from pyspark.sql.functions import col, sum as spark_sum, when, lit, lower, lag
+from pyspark.sql.window import Window
+from pyspark.sql.types import DecimalType, LongType, StringType
+from decimal import Decimal
 
 class MicroVelocityAnalyzer:
     def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1):
@@ -11,138 +13,120 @@ class MicroVelocityAnalyzer:
         self.transfers_file = transfers_file
         self.output_file = output_file
         self.save_every_n = save_every_n
-        self.accounts = {}
-        self.min_block_number = float('inf')
-        self.max_block_number = float('-inf')
-        self.velocities = {}
-        self.balances = {}
-        self.LIMIT = 0
         self._create_output_folder()
+        self.spark = SparkSession.builder.appName("MicroVelocityAnalyzer").getOrCreate()
+        self.spark.conf.set("spark.sql.execution.arrow.pyspark.enabled", "true")
 
     def _create_output_folder(self):
         output_folder = os.path.dirname(self.output_file)
         if output_folder and not os.path.exists(output_folder):
             os.makedirs(output_folder)
 
-    def load_allocated_data(self):
-        with open(self.allocated_file, 'r') as file:
-            reader = csv.DictReader(file)
-            for line in tqdm(reader):
-                self._process_allocation(line)
+    def load_data(self):
+        print("Loading allocated data...")
+        allocated_df = self.spark.read.csv(
+            self.allocated_file,
+            header=True,
+            inferSchema=False
+        ).select(
+            lower(col('to_address')).alias('address').cast(StringType()),
+            col('amount').cast(StringType()),
+            col('block_number').cast(LongType())
+        ).withColumn('type', lit('allocation'))
 
-    def _process_allocation(self, line):
-        to_address = line['to_address'].lower()
-        amount = int(line['amount'])
-        block_number = int(line['block_number'])
+        print("Loading transfer data...")
+        transfers_df = self.spark.read.csv(
+            self.transfers_file,
+            header=True,
+            inferSchema=False
+        )
 
-        if to_address not in self.accounts:
-            self.accounts[to_address] = [{}, {}]
-        
-        if block_number not in self.accounts[to_address][0]:
-            self.accounts[to_address][0][block_number] = amount
-        else:
-            self.accounts[to_address][0][block_number] += amount
+        transfers_in = transfers_df.select(
+            lower(col('to_address')).alias('address').cast(StringType()),
+            col('amount').cast(StringType()),
+            col('block_number').cast(LongType())
+        ).withColumn('type', lit('transfer_in'))
 
-        self.min_block_number = min(self.min_block_number, block_number)
-        self.max_block_number = max(self.max_block_number, block_number)
+        transfers_out = transfers_df.select(
+            lower(col('from_address')).alias('address').cast(StringType()),
+            (-col('amount').cast(StringType())).alias('amount'),
+            col('block_number').cast(LongType())
+        ).withColumn('type', lit('transfer_out'))
 
-    def load_transfer_data(self):
-        with open(self.transfers_file, 'r') as file:
-            reader = csv.DictReader(file)
-            for line in tqdm(reader):
-                self._process_transfer(line)
+        self.all_transactions = allocated_df.union(transfers_in).union(transfers_out)
 
-    def _process_transfer(self, line):
-        from_address = line['from_address'].lower()
-        to_address = line['to_address'].lower()
-        amount = int(line['amount'])
-        block_number = int(line['block_number'])
+        # Convert amount to Decimal with high precision
+        decimal_type = DecimalType(38, 0)  # Adjust precision and scale as needed
+        self.all_transactions = self.all_transactions.withColumn('amount', col('amount').cast(decimal_type))
 
-        # Assets
-        if to_address not in self.accounts:
-            self.accounts[to_address] = [{}, {}]
-        if block_number not in self.accounts[to_address][0]:
-            self.accounts[to_address][0][block_number] = amount
-        else:
-            self.accounts[to_address][0][block_number] += amount
-
-        # Liabilities
-        if from_address not in self.accounts:
-            self.accounts[from_address] = [{}, {}]
-        if block_number not in self.accounts[from_address][1]:
-            self.accounts[from_address][1][block_number] = amount
-        else:
-            self.accounts[from_address][1][block_number] += amount
-
-        self.min_block_number = min(self.min_block_number, block_number)
-        self.max_block_number = max(self.max_block_number, block_number)
-
-    def calculate_velocities(self):
-        for address in tqdm(self.accounts.keys()):
-            if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
-                self._calculate_individual_velocity(address)
-
-    def _calculate_individual_velocity(self, address):
-        arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
-        arranged_keys[0].sort()
-        arranged_keys[1].sort()
-        ind_velocity = np.zeros(self.LIMIT)
-
-        for border in tqdm(arranged_keys[1], leave=False):
-            arranged_keys[0] = list(self.accounts[address][0].keys())
-            test = np.array(arranged_keys[0])
-
-            for i in range(0, len(test[test < border])):
-                counter = test[test < border][(len(test[test < border]) - 1) - i]
-                if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
-                    ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
-                    #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
-                    self.accounts[address][0][counter] -= self.accounts[address][1][border]
-                    self.accounts[address][1].pop(border)
-                    break
-                else:
-                    ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
-                    #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
-                    self.accounts[address][1][border] -= self.accounts[address][0][counter]
-                    self.accounts[address][0].pop(counter)
-        # Save only every Nth position of the array
-        self.velocities[address] = ind_velocity[::self.save_every_n]
-
-    def calculate_balances(self):
-        for address in tqdm(self.accounts.keys()):
-            balance = 0
-            balances = np.zeros(self.LIMIT)
-            for block_number in tqdm(range(self.min_block_number, self.max_block_number + 1), leave=False):
-                if block_number in self.accounts[address][0]:
-                    balance += self.accounts[address][0][block_number]
-                if block_number in self.accounts[address][1]:
-                    balance -= self.accounts[address][1][block_number]
-                balances[block_number - self.min_block_number] = balance
-            # Save only every Nth position of the array
-            self.balances[address] = balances[::self.save_every_n]
-
-    def save_results(self):
-        with open(self.output_file, 'wb') as file:
-            pickle.dump([self.accounts, self.velocities, self.balances], file)
-
-    def run_analysis(self):
-        print("Loading allocated data...",  self.allocated_file)
-        self.load_allocated_data()
-        print("Loading transfer data...", self.transfers_file)
-        self.load_transfer_data()
-        print ("Computing interval of ", self.save_every_n, " blocks")
+        # Compute min and max block numbers
+        self.min_block_number = self.all_transactions.agg({"block_number": "min"}).collect()[0][0]
+        self.max_block_number = self.all_transactions.agg({"block_number": "max"}).collect()[0][0]
+        self.LIMIT = self.max_block_number - self.min_block_number + 1
         print(f"Min block number: {self.min_block_number}")
         print(f"Max block number: {self.max_block_number}")
-        self.LIMIT = self.max_block_number - self.min_block_number + 1
-
         print(f"Number of blocks considered: {self.LIMIT}")
-        print("Calculating velocities...")
-        self.calculate_velocities()
-        print("Calculating balances...")
-        self.calculate_balances()
+
+    def calculate_balances_and_velocities(self):
+        print("Calculating balances and velocities...")
+
+        # Group transactions by address and block_number and sum amounts
+        grouped = self.all_transactions.groupBy('address', 'block_number').agg(
+            spark_sum('amount').alias('net_amount')
+        )
+
+        # Define window for cumulative sum
+        window_spec = Window.partitionBy('address').orderBy('block_number').rowsBetween(Window.unboundedPreceding, 0)
+
+        # Calculate cumulative balance per address
+        balances = grouped.withColumn('balance', spark_sum('net_amount').over(window_spec))
+
+        # Calculate velocities
+        window_spec_lag = Window.partitionBy('address').orderBy('block_number')
+        balances = balances.withColumn('prev_balance', lag('balance', 1).over(window_spec_lag))
+        balances = balances.withColumn('prev_block_number', lag('block_number', 1).over(window_spec_lag))
+
+        balances = balances.withColumn('delta_balance', col('balance') - col('prev_balance'))
+        balances = balances.withColumn('delta_time', col('block_number') - col('prev_block_number'))
+        balances = balances.withColumn('velocity', when(col('delta_time') > 0, col('delta_balance') / col('delta_time')).otherwise(0))
+
+        # Fill null values
+        balances = balances.fillna({'velocity': 0, 'delta_time': 1})
+
+        # Save every Nth position
+        if self.save_every_n > 1:
+            balances = balances.filter((col('block_number') - self.min_block_number) % self.save_every_n == 0)
+
+        # Collect results
+        self.balances = balances.select('address', 'block_number', 'balance').collect()
+        self.velocities = balances.select('address', 'block_number', 'velocity').collect()
+
+    def save_results(self):
         print("Saving results...")
+        # Convert collected rows to dictionaries
+        balances_dict = {}
+        for row in self.balances:
+            address = row['address']
+            if address not in balances_dict:
+                balances_dict[address] = []
+            balances_dict[address].append((row['block_number'], row['balance']))
+
+        velocities_dict = {}
+        for row in self.velocities:
+            address = row['address']
+            if address not in velocities_dict:
+                velocities_dict[address] = []
+            velocities_dict[address].append((row['block_number'], row['velocity']))
+
+        with open(self.output_file, 'wb') as file:
+            pickle.dump({'balances': balances_dict, 'velocities': velocities_dict}, file)
+
+    def run_analysis(self):
+        self.load_data()
+        self.calculate_balances_and_velocities()
         self.save_results()
         print("Done!")
+        self.spark.stop()
 
 def main():
     parser = argparse.ArgumentParser(description='Micro Velocity Analyzer')
