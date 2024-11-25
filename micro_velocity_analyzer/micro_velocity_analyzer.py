@@ -6,6 +6,78 @@ import csv
 from tqdm import tqdm
 from concurrent.futures import ProcessPoolExecutor
 
+def process_chunk_balances(args):
+    addresses, accounts_chunk, min_block_number, max_block_number, save_every_n, LIMIT, pos = args
+    results = {}
+    save_block_numbers = [min_block_number + i * save_every_n for i in range(LIMIT)]
+    for address in tqdm(addresses, position=pos, leave=True):
+        # Collect all balance changes
+        balance_changes = []
+        for block_number, amount in accounts_chunk[address][0].items():
+            balance_changes.append((int(block_number), float(amount)))
+        for block_number, amount in accounts_chunk[address][1].items():
+            balance_changes.append((int(block_number), -float(amount)))
+        # Sort the balance changes by block number
+        balance_changes.sort()
+        # Initialize balance and index for balance changes
+        balance = 0.0
+        change_idx = 0
+        balances = []
+        # Iterate over save_block_numbers
+        for block_number in save_block_numbers:
+            # Apply all balance changes up to the current block_number
+            while change_idx < len(balance_changes) and balance_changes[change_idx][0] <= block_number:
+                balance += balance_changes[change_idx][1]
+                change_idx += 1
+            balances.append(balance)
+        results[address] = np.array(balances, dtype=np.float64)
+    return results
+
+def process_chunk_velocities(args):
+    addresses, accounts_chunk, min_block_number, save_every_n, LIMIT, pos = args
+    results = {}
+    for address in tqdm(addresses, position=pos, leave=True):
+        if len(accounts_chunk[address][0]) > 0 and len(accounts_chunk[address][1]) > 0:
+            arranged_keys = [list(accounts_chunk[address][0].keys()), list(accounts_chunk[address][1].keys())]
+            arranged_keys[0].sort()
+            arranged_keys[1].sort()
+            ind_velocity = np.zeros(LIMIT, dtype=np.float64)
+
+            for border in arranged_keys[1]:
+                arranged_keys[0] = list(accounts_chunk[address][0].keys())
+                test = np.array(arranged_keys[0], dtype=int)
+
+                for i in range(0, len(test[test < border])):
+                    counter = test[test < border][(len(test[test < border]) - 1) - i]
+                    asset_amount = float(accounts_chunk[address][0][counter])
+                    liability_amount = float(accounts_chunk[address][1][border])
+                    if (asset_amount - liability_amount) >= 0:
+                        idx_range = np.unique(np.arange(counter - min_block_number, border - min_block_number)//save_every_n)
+                        if len(idx_range) == 1:
+                            accounts_chunk[address][0][counter] -= liability_amount
+                            accounts_chunk[address][1].pop(border)
+                            break
+                        else:
+                            duration = border - counter
+                            if duration > 0:
+                                ind_velocity[idx_range[1:]] += liability_amount / duration
+                            accounts_chunk[address][0][counter] -= liability_amount
+                            accounts_chunk[address][1].pop(border)
+                            break
+                    else:
+                        idx_range = np.unique(np.arange(counter - min_block_number, border - min_block_number)//save_every_n)
+                        if len(idx_range) == 1:
+                            accounts_chunk[address][1][border] -= asset_amount
+                            accounts_chunk[address][0].pop(counter)
+                        else:
+                            duration = border - counter
+                            if duration > 0:
+                                ind_velocity[idx_range[1:]] += asset_amount / duration
+                            accounts_chunk[address][1][border] -= asset_amount
+                            accounts_chunk[address][0].pop(counter)
+            results[address] = ind_velocity
+    return results
+
 class MicroVelocityAnalyzer:
     def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1):
         self.allocated_file = allocated_file
@@ -14,6 +86,7 @@ class MicroVelocityAnalyzer:
         self.save_every_n = save_every_n
         self.n_cores = n_cores
         self.accounts = {}
+        self.backup_accounts = {}
         self.min_block_number = float('inf')
         self.max_block_number = float('-inf')
         self.velocities = {}
@@ -26,8 +99,6 @@ class MicroVelocityAnalyzer:
         if output_folder and not os.path.exists(output_folder):
             os.makedirs(output_folder)
     
-
-
     def load_allocated_data(self):
         with open(self.allocated_file, 'r') as file:
             reader = csv.DictReader(file)
@@ -36,8 +107,12 @@ class MicroVelocityAnalyzer:
 
     def _process_allocation(self, line):
         to_address = line['to_address'].lower()
-        amount = int(line['amount'])
-        block_number = int(line['block_number'])
+        try:
+            amount = float(line['amount'])  # Use float
+            block_number = int(line['block_number'])
+        except ValueError:
+            print(f"Invalid data in allocated_file: {line}")
+            return  # Skip this line
 
         if to_address not in self.accounts:
             self.accounts[to_address] = [{}, {}]
@@ -59,8 +134,12 @@ class MicroVelocityAnalyzer:
     def _process_transfer(self, line):
         from_address = line['from_address'].lower()
         to_address = line['to_address'].lower()
-        amount = int(line['amount'])
-        block_number = int(line['block_number'])
+        try:
+            amount = float(line['amount'])  # Use float
+            block_number = int(line['block_number'])
+        except ValueError:
+            print(f"Invalid data in transfers_file: {line}")
+            return  # Skip this line
 
         # Assets
         if to_address not in self.accounts:
@@ -81,6 +160,47 @@ class MicroVelocityAnalyzer:
         self.min_block_number = min(self.min_block_number, block_number)
         self.max_block_number = max(self.max_block_number, block_number)
 
+    def calculate_balances(self):
+        save_block_numbers = [self.min_block_number + i * self.save_every_n for i in range(self.LIMIT)]
+        for address in tqdm(self.accounts.keys()):
+            # Collect all balance changes
+            balance_changes = []
+            for block_number, amount in self.accounts[address][0].items():
+                balance_changes.append((int(block_number), float(amount)))
+            for block_number, amount in self.accounts[address][1].items():
+                balance_changes.append((int(block_number), -float(amount)))
+            # Sort the balance changes by block number
+            balance_changes.sort()
+            # Initialize balance and index for balance changes
+            balance = 0.0
+            change_idx = 0
+            balances = []
+            # Iterate over save_block_numbers
+            for block_number in save_block_numbers:
+                # Apply all balance changes up to the current block_number
+                while change_idx < len(balance_changes) and balance_changes[change_idx][0] <= block_number:
+                    balance += balance_changes[change_idx][1]
+                    change_idx += 1
+                balances.append(balance)
+            self.balances[address] = np.array(balances, dtype=np.float64)
+
+    def calculate_balances_parallel(self):
+        addresses = list(self.accounts.keys())
+        chunk_size = max(1, len(addresses) // self.n_cores)
+        chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
+
+        args_list = []
+        for i, chunk in enumerate(chunks):
+            accounts_chunk = {address: self.accounts[address] for address in chunk}
+            args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, i+1))
+
+        with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
+            futures = [executor.submit(process_chunk_balances, args) for args in args_list]
+
+            for future in tqdm(futures):
+                chunk_results = future.result()
+                self.balances.update(chunk_results)
+
     def calculate_velocities(self):
         for address in tqdm(self.accounts.keys()):
             if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
@@ -90,136 +210,83 @@ class MicroVelocityAnalyzer:
         arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
         arranged_keys[0].sort()
         arranged_keys[1].sort()
-        ind_velocity = np.zeros(self.LIMIT)
+        ind_velocity = np.zeros(self.LIMIT, dtype=np.float64)
 
         for border in tqdm(arranged_keys[1], leave=False):
             arranged_keys[0] = list(self.accounts[address][0].keys())
-            test = np.array(arranged_keys[0])
+            test = np.array(arranged_keys[0], dtype=int)
 
             for i in range(0, len(test[test < border])):
                 counter = test[test < border][(len(test[test < border]) - 1) - i]
-                if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
-                    idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
+                asset_amount = float(self.accounts[address][0][counter])
+                liability_amount = float(self.accounts[address][1][border])
+                if (asset_amount - liability_amount) >= 0:
+                    idx_range = np.unique(np.arange(counter - self.min_block_number, border - self.min_block_number)//self.save_every_n)
                     if len(idx_range) == 1:
-                        self.accounts[address][0][counter] -= self.accounts[address][1][border]
+                        self.accounts[address][0][counter] -= liability_amount
                         self.accounts[address][1].pop(border)
                         break
                     else:
-                        #ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
-                        ind_velocity[idx_range[1:]] += (self.accounts[address][1][border]) / (border - counter)
-                        #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
-                        self.accounts[address][0][counter] -= self.accounts[address][1][border]
+                        duration = border - counter
+                        if duration > 0:
+                            ind_velocity[idx_range[1:]] += liability_amount / duration
+                        self.accounts[address][0][counter] -= liability_amount
                         self.accounts[address][1].pop(border)
                         break
                 else:
-                    idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
+                    idx_range = np.unique(np.arange(counter - self.min_block_number, border - self.min_block_number)//self.save_every_n)
                     if len(idx_range) == 1:
-                        self.accounts[address][1][border] -= self.accounts[address][0][counter]
+                        self.accounts[address][1][border] -= asset_amount
                         self.accounts[address][0].pop(counter)
                     else:
-                        #ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
-                        ind_velocity[idx_range[1:]] += (self.accounts[address][0][counter]) / (border - counter)
-                        #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
-                        self.accounts[address][1][border] -= self.accounts[address][0][counter]
+                        duration = border - counter
+                        if duration > 0:
+                            ind_velocity[idx_range[1:]] += asset_amount / duration
+                        self.accounts[address][1][border] -= asset_amount
                         self.accounts[address][0].pop(counter)
-        # Save only every Nth position of the array
-        self.velocities[address] = ind_velocity#[::self.save_every_n]
+        self.velocities[address] = ind_velocity
 
     def calculate_velocities_parallel(self):
-
-        # Split addresses into chunks
         addresses = list(self.accounts.keys())
         chunk_size = max(1, len(addresses) // self.n_cores)
         chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
 
-        # Process chunks in parallel
-        with ProcessPoolExecutor() as executor:
-            futures = [executor.submit(self._process_chunk, chunk, i+1) for i,chunk in enumerate(chunks)]
-            
-            # Collect results
+        args_list = []
+        for i, chunk in enumerate(chunks):
+            accounts_chunk = {address: self.accounts[address] for address in chunk}
+            args_list.append((chunk, accounts_chunk, self.min_block_number, self.save_every_n, self.LIMIT, i+1))
+
+        with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
+            futures = [executor.submit(process_chunk_velocities, args) for args in args_list]
+
             for future in tqdm(futures):
                 chunk_results = future.result()
                 self.velocities.update(chunk_results)
 
-    # Helper function to process chunks
-    def _process_chunk(self, addresses, pos):
-        results = {}
-        for address in tqdm(addresses, position=pos, leave=True):
-            if len(self.accounts[address][0]) > 0 and len(self.accounts[address][1]) > 0:
-                arranged_keys = [list(self.accounts[address][0].keys()), list(self.accounts[address][1].keys())]
-                arranged_keys[0].sort()
-                arranged_keys[1].sort()
-                ind_velocity = np.zeros(self.LIMIT)
-
-                for border in arranged_keys[1]:
-                    arranged_keys[0] = list(self.accounts[address][0].keys())
-                    test = np.array(arranged_keys[0])
-
-                    for i in range(0, len(test[test < border])):
-                        counter = test[test < border][(len(test[test < border]) - 1) - i]
-                        if (self.accounts[address][0][counter] - self.accounts[address][1][border]) >= 0:
-                            idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
-                            if len(idx_range) == 1:
-                                self.accounts[address][0][counter] -= self.accounts[address][1][border]
-                                self.accounts[address][1].pop(border)
-                                break
-                            else:
-                                #ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)] += (self.accounts[address][1][border]) / (border - counter)
-                                ind_velocity[idx_range[1:]] += (self.accounts[address][1][border]) / (border - counter)
-                                #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
-                                self.accounts[address][0][counter] -= self.accounts[address][1][border]
-                                self.accounts[address][1].pop(border)
-                                break
-                        else:
-                            idx_range = np.unique(np.arange(counter-self.min_block_number, border-self.min_block_number)//self.save_every_n)
-                            if len(idx_range) == 1:
-                                self.accounts[address][1][border] -= self.accounts[address][0][counter]
-                                self.accounts[address][0].pop(counter)
-                            else:
-                                #ind_velocity[counter-self.min_block_number:border-self.min_block_number] += (self.accounts[address][0][counter]) / (border - counter)
-                                ind_velocity[idx_range[1:]] += (self.accounts[address][0][counter]) / (border - counter)
-                                #print(ind_velocity[(counter-self.min_block_number):(border-self.min_block_number)])
-                                self.accounts[address][1][border] -= self.accounts[address][0][counter]
-                                self.accounts[address][0].pop(counter)
-                results[address] = ind_velocity#[::self.save_every_n]
-        return results
-
-    def calculate_balances(self):
-        for address in tqdm(self.accounts.keys()):
-            balance = 0
-            balances = np.zeros(self.LIMIT)
-            for block_number in tqdm(range(self.min_block_number, self.max_block_number + 1), leave=False):
-                if block_number in self.accounts[address][0]:
-                    balance += self.accounts[address][0][block_number]
-                if block_number in self.accounts[address][1]:
-                    balance -= self.accounts[address][1][block_number]
-                if block_number % self.save_every_n == 0:
-                    balances[(block_number - self.min_block_number)//self.save_every_n] = balance
-            # Save only every Nth position of the array
-            self.balances[address] = balances#[::self.save_every_n]
-
     def save_results(self):
         with open(self.output_file, 'wb') as file:
-            pickle.dump([self.velocities, self.balances], file)
+            pickle.dump([self.backup_accounts,self.velocities, self.balances], file)
 
     def run_analysis(self):
         print("Loading allocated data...",  self.allocated_file)
         self.load_allocated_data()
         print("Loading transfer data...", self.transfers_file)
         self.load_transfer_data()
-        print ("Computing interval of ", self.save_every_n, " blocks")
+        print("Computing interval of ", self.save_every_n, " blocks")
         print(f"Min block number: {self.min_block_number}")
         print(f"Max block number: {self.max_block_number}")
         self.LIMIT = (self.max_block_number - self.min_block_number)//self.save_every_n + 1
-
+        self.backup_accounts = self.accounts.copy()
         print(f"Number of blocks considered: {self.LIMIT}")
-        print("Calculating velocities...")
+        print("Calculating balances...")
         if self.n_cores == 1:
+            self.calculate_balances()
+            print("Calculating velocities...")
             self.calculate_velocities()
         else:
+            self.calculate_balances_parallel()
+            print("Calculating velocities...")
             self.calculate_velocities_parallel()
-        print("Calculating balances...")
-        self.calculate_balances()
         print("Saving results...")
         self.save_results()
         print("Done!")
