@@ -102,7 +102,8 @@ class MicroVelocityAnalyzer:
     def load_allocated_data(self):
         with open(self.allocated_file, 'r') as file:
             reader = csv.DictReader(file)
-            for line in tqdm(reader, total=len(list(reader))):
+            rows = list(reader)
+            for line in tqdm(rows):
                 self._process_allocation(line)
 
     def _process_allocation(self, line):
@@ -128,7 +129,8 @@ class MicroVelocityAnalyzer:
     def load_transfer_data(self):
         with open(self.transfers_file, 'r') as file:
             reader = csv.DictReader(file)
-            for line in tqdm(reader, total=len(list(reader))):
+            rows = list(reader)
+            for line in tqdm(rows):
                 self._process_transfer(line)
 
     def _process_transfer(self, line):
