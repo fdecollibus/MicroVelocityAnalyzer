@@ -187,7 +187,7 @@ class MicroVelocityAnalyzer:
     def calculate_balances_parallel(self):
         addresses = list(self.accounts.keys())
         chunk_size = max(1, len(addresses) // self.n_cores)
-        chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
+        chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
         args_list = []
         for i, chunk in enumerate(chunks):
@@ -249,7 +249,7 @@ class MicroVelocityAnalyzer:
     def calculate_velocities_parallel(self):
         addresses = list(self.accounts.keys())
         chunk_size = max(1, len(addresses) // self.n_cores)
-        chunks = [addresses[i:i + chunk_size] for i in range(0, len(addresses), chunk_size)]
+        chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
         args_list = []
         for i, chunk in enumerate(chunks):
