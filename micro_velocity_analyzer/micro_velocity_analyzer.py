@@ -195,7 +195,7 @@ class MicroVelocityAnalyzer:
         args_list = []
         for i, chunk in enumerate(chunks):
             accounts_chunk = {address: self.accounts[address] for address in chunk}
-            args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, (i+1)%self.n_cores))
+            args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
 
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             futures = [executor.submit(process_chunk_balances, args) for args in args_list]
@@ -257,7 +257,7 @@ class MicroVelocityAnalyzer:
         args_list = []
         for i, chunk in enumerate(chunks):
             accounts_chunk = {address: self.accounts[address] for address in chunk}
-            args_list.append((chunk, accounts_chunk, self.min_block_number, self.save_every_n, self.LIMIT, (i+1)%self.n_cores))
+            args_list.append((chunk, accounts_chunk, self.min_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
 
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             futures = [executor.submit(process_chunk_velocities, args) for args in args_list]
