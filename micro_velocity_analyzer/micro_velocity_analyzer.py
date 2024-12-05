@@ -31,6 +31,8 @@ def process_chunk_balances(args):
                 change_idx += 1
             balances.append(balance)
         results[address] = np.array(balances, dtype=np.float64)
+    
+    del balance_changes, balances
     return results
 
 def process_chunk_velocities(args):
@@ -198,7 +200,7 @@ class MicroVelocityAnalyzer:
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             futures = [executor.submit(process_chunk_balances, args) for args in args_list]
 
-            for future in tqdm(futures):
+            for future in tqdm(futures, pos=0):
                 chunk_results = future.result()
                 self.balances.update(chunk_results)
 
