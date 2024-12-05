@@ -79,12 +79,13 @@ def process_chunk_velocities(args):
     return results
 
 class MicroVelocityAnalyzer:
-    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1):
+    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1, n_chunks=1):
         self.allocated_file = allocated_file
         self.transfers_file = transfers_file
         self.output_file = output_file
         self.save_every_n = save_every_n
         self.n_cores = n_cores
+        self.n_chunks = n_chunks
         self.accounts = {}
         self.backup_accounts = {}
         self.min_block_number = float('inf')
@@ -186,7 +187,7 @@ class MicroVelocityAnalyzer:
 
     def calculate_balances_parallel(self):
         addresses = list(self.accounts.keys())
-        chunk_size = max(1, len(addresses) // self.n_cores)
+        chunk_size = max(1, len(addresses) // self.n_chunks)
         chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
         args_list = []
@@ -248,7 +249,7 @@ class MicroVelocityAnalyzer:
 
     def calculate_velocities_parallel(self):
         addresses = list(self.accounts.keys())
-        chunk_size = max(1, len(addresses) // self.n_cores)
+        chunk_size = max(1, len(addresses) // self.n_chunks)
         chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
         args_list = []
@@ -298,6 +299,7 @@ def main():
     parser.add_argument('--output_file', type=str, default='sampledata/general_velocities.pickle', help='Path to the output file')
     parser.add_argument('--save_every_n', type=int, default=1, help='Save every Nth position of the velocity array')
     parser.add_argument('--n_cores', type=int, default=1, help='Number of cores to use')
+    parser.add_argument('--n_chunks', type=int, default=1, help='Number of chunks to split the data into (must be >= n_cores)')
     args = parser.parse_args()
 
     analyzer = MicroVelocityAnalyzer(
@@ -305,7 +307,8 @@ def main():
         transfers_file=args.transfers_file,
         output_file=args.output_file,
         save_every_n=args.save_every_n,
-        n_cores=args.n_cores
+        n_cores=args.n_cores,
+        n_chunks=args.n_chunks
     )
     analyzer.run_analysis()
 
