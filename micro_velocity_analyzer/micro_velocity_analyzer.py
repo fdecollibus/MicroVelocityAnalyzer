@@ -189,6 +189,7 @@ class MicroVelocityAnalyzer:
 
     def calculate_balances_parallel(self):
         addresses = list(self.accounts.keys())
+        np.random.shuffle(addresses) # Shuffle to avoid having a few addresses with many transactions in the same chunk
         chunk_size = max(1, len(addresses) // self.n_chunks)
         chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
@@ -251,6 +252,7 @@ class MicroVelocityAnalyzer:
 
     def calculate_velocities_parallel(self):
         addresses = list(self.accounts.keys())
+        np.random.shuffle(addresses) # Shuffle to distribute addresses with different number of transactions
         chunk_size = max(1, len(addresses) // self.n_chunks)
         chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
