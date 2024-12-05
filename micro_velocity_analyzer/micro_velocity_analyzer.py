@@ -195,12 +195,12 @@ class MicroVelocityAnalyzer:
         args_list = []
         for i, chunk in enumerate(chunks):
             accounts_chunk = {address: self.accounts[address] for address in chunk}
-            args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, i+1))
+            args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, (i+1)%self.n_cores))
 
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             futures = [executor.submit(process_chunk_balances, args) for args in args_list]
 
-            for future in tqdm(futures, pos=0):
+            for future in tqdm(futures, position=0):
                 chunk_results = future.result()
                 self.balances.update(chunk_results)
 
@@ -257,12 +257,12 @@ class MicroVelocityAnalyzer:
         args_list = []
         for i, chunk in enumerate(chunks):
             accounts_chunk = {address: self.accounts[address] for address in chunk}
-            args_list.append((chunk, accounts_chunk, self.min_block_number, self.save_every_n, self.LIMIT, i+1))
+            args_list.append((chunk, accounts_chunk, self.min_block_number, self.save_every_n, self.LIMIT, (i+1)%self.n_cores))
 
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             futures = [executor.submit(process_chunk_velocities, args) for args in args_list]
 
-            for future in tqdm(futures):
+            for future in tqdm(futures, position=0):
                 chunk_results = future.result()
                 self.velocities.update(chunk_results)
 
