@@ -220,17 +220,46 @@ class MicroVelocityAnalyzer:
         chunk_size = max(1, len(addresses) // self.n_chunks)
         chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
-        args_list = []
-        for i, chunk in enumerate(chunks):
-            accounts_chunk = {address: self.accounts[address] for address in chunk}
-            args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
+        # args_list = []
+        # for i, chunk in enumerate(chunks):
+        #     accounts_chunk = {address: self.accounts[address] for address in chunk}
+        #     args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
 
+        # with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
+        #     futures = [executor.submit(process_chunk_balances_v2, args) for args in args_list]
+
+        #     for future in tqdm(futures, position=0):
+        #         chunk_results = future.result()
+        #         self.balances.update(chunk_results)
+
+        # Process in batches of n_cores
+        total_chunks = len(chunks)
+        processed_chunks = 0
+        
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
-            futures = [executor.submit(process_chunk_balances_v2, args) for args in args_list]
-
-            for future in tqdm(futures, position=0):
-                chunk_results = future.result()
-                self.balances.update(chunk_results)
+            with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
+                while processed_chunks < total_chunks:
+                    # Submit batch of n_cores chunks
+                    current_batch = chunks[processed_chunks:processed_chunks + self.n_cores]
+                    futures = []
+                    
+                    for i, chunk in enumerate(current_batch):
+                        accounts_chunk = {address: self.accounts[address] for address in chunk}
+                        args = (chunk, accounts_chunk, self.min_block_number, 
+                            self.max_block_number, self.save_every_n, 
+                            self.LIMIT, i + 1)
+                        futures.append(executor.submit(process_chunk_balances_v2, args))
+                    
+                    # Process results as they complete
+                    for future in as_completed(futures):
+                        chunk_results = future.result()
+                        self.balances.update(chunk_results)
+                        del chunk_results
+                        processed_chunks += 1
+                        pbar.update(1)
+                    
+                    # Clean up
+                    del futures
 
     def calculate_velocities(self):
         for address in tqdm(self.accounts.keys()):
