@@ -41,7 +41,7 @@ def process_chunk_balances_v2(args):
     save_block_numbers = [min_block_number + i * save_every_n for i in range(LIMIT)]
 
     results = {}
-    
+
     for address in tqdm(addresses, position=pos, leave=False):
         current_balance = 0.0
         block_numbers = set(accounts_chunk[address][0].keys()).union(set(accounts_chunk[address][1].keys()))
@@ -226,7 +226,7 @@ class MicroVelocityAnalyzer:
             args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
 
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
-            futures = [executor.submit(process_chunk_balances, args) for args in args_list]
+            futures = [executor.submit(process_chunk_balances_v2, args) for args in args_list]
 
             for future in tqdm(futures, position=0):
                 chunk_results = future.result()
