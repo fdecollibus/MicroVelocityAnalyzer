@@ -35,6 +35,33 @@ def process_chunk_balances(args):
     del balance_changes, balances
     return results
 
+def process_chunk_balances_v2(args):
+    addresses, accounts_chunk, min_block_number, max_block_number, save_every_n, LIMIT, pos = args
+    
+    save_block_numbers = [min_block_number + i * save_every_n for i in range(LIMIT)]
+
+    results = {}
+    
+    for address in tqdm(addresses, position=pos, leave=False):
+        current_balance = 0.0
+        block_numbers = set(accounts_chunk[address][0].keys()).union(set(accounts_chunk[address][1].keys()))
+        block_numbers = sorted(block_numbers)
+
+        balances = np.zeros(len(save_block_numbers), dtype=np.float64)
+        for block in block_numbers:
+            if block in accounts_chunk[address][0]:
+                current_balance += accounts_chunk[address][0][block]
+            if block in accounts_chunk[address][1]:
+                current_balance -= accounts_chunk[address][1][block]
+            idx = (block - min_block_number) // save_every_n + 1
+            if idx < len(balances):
+                balances[idx] = current_balance
+
+        results[address] = balances
+        del balances
+    
+    return results
+
 def process_chunk_velocities(args):
     addresses, accounts_chunk, min_block_number, save_every_n, LIMIT, pos = args
     results = {}
