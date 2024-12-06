@@ -4,7 +4,7 @@ import pickle
 import numpy as np
 import csv
 from tqdm import tqdm
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 def process_chunk_balances(args):
     addresses, accounts_chunk, min_block_number, max_block_number, save_every_n, LIMIT, pos = args
