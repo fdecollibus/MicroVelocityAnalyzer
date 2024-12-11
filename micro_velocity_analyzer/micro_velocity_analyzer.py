@@ -108,13 +108,14 @@ def process_chunk_velocities(args):
     return results
 
 class MicroVelocityAnalyzer:
-    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1, n_chunks=1):
+    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1, n_chunks=1, split_save=False):
         self.allocated_file = allocated_file
         self.transfers_file = transfers_file
         self.output_file = output_file
         self.save_every_n = save_every_n
         self.n_cores = n_cores
         self.n_chunks = n_chunks
+        self.split_save = split_save
         self.accounts = {}
         self.backup_accounts = {}
         self.min_block_number = float('inf')
@@ -213,52 +214,131 @@ class MicroVelocityAnalyzer:
                     change_idx += 1
                 balances.append(balance)
             self.balances[address] = np.array(balances, dtype=np.float64)
+        
+    # def calculate_balances_parallel(self):
+    #     addresses = list(self.accounts.keys())
+    #     np.random.shuffle(addresses) # Shuffle to avoid having a few addresses with many transactions in the same chunk
+    #     chunk_size = max(1, len(addresses) // self.n_chunks)
+    #     chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
+
+    #     # Process in batches of n_cores
+    #     total_chunks = len(chunks)
+    #     processed_chunks = 0
+        
+    #     with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
+    #         with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
+    #             while processed_chunks < total_chunks:
+    #                 # Submit batch of n_cores chunks
+    #                 current_batch = chunks[processed_chunks:processed_chunks + self.n_cores]
+    #                 futures = []
+                    
+    #                 for i, chunk in enumerate(current_batch):
+    #                     accounts_chunk = {address: self.accounts[address] for address in chunk}
+    #                     args = (chunk, accounts_chunk, self.min_block_number, 
+    #                         self.max_block_number, self.save_every_n, 
+    #                         self.LIMIT, i + 1)
+    #                     futures.append(executor.submit(process_chunk_balances_v2, args))
+                    
+    #                 # Process results as they complete
+    #                 for future in as_completed(futures):
+    #                     chunk_results = future.result()
+    #                     self.balances.update(chunk_results)
+    #                     del chunk_results
+    #                     processed_chunks += 1
+    #                     pbar.update(1)
+                    
+    #                 # Clean up
+    #                 del futures
+
+    def _get_split_filename(self, base_type, last_address):
+        """Generate filename for split saves"""
+        dirname = os.path.dirname(self.output_file)
+        basename = os.path.splitext(os.path.basename(self.output_file))[0]
+        return os.path.join(dirname, f"{basename}_{base_type}_{last_address}.pickle")
+
+    def _save_split_results(self, results, result_type, last_address):
+        """Save intermediate results to split file"""
+        filename = self._get_split_filename(result_type, last_address)
+        print(f'Saving {result_type} to {filename}')
+        with open(filename, 'wb') as f:
+            pickle.dump(results, f)
 
     def calculate_balances_parallel(self):
         addresses = list(self.accounts.keys())
-        np.random.shuffle(addresses) # Shuffle to avoid having a few addresses with many transactions in the same chunk
+        if not self.split_save:
+            np.random.shuffle(addresses)
+            
         chunk_size = max(1, len(addresses) // self.n_chunks)
         chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
-
-        # args_list = []
-        # for i, chunk in enumerate(chunks):
-        #     accounts_chunk = {address: self.accounts[address] for address in chunk}
-        #     args_list.append((chunk, accounts_chunk, self.min_block_number, self.max_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
-
-        # with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
-        #     futures = [executor.submit(process_chunk_balances_v2, args) for args in args_list]
-
-        #     for future in tqdm(futures, position=0):
-        #         chunk_results = future.result()
-        #         self.balances.update(chunk_results)
-
-        # Process in batches of n_cores
+        
         total_chunks = len(chunks)
         processed_chunks = 0
+        batch_results = {}
         
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
                 while processed_chunks < total_chunks:
-                    # Submit batch of n_cores chunks
                     current_batch = chunks[processed_chunks:processed_chunks + self.n_cores]
                     futures = []
                     
                     for i, chunk in enumerate(current_batch):
                         accounts_chunk = {address: self.accounts[address] for address in chunk}
                         args = (chunk, accounts_chunk, self.min_block_number, 
-                            self.max_block_number, self.save_every_n, 
-                            self.LIMIT, i + 1)
-                        futures.append(executor.submit(process_chunk_balances_v2, args))
+                               self.max_block_number, self.save_every_n, 
+                               self.LIMIT, i + 1)
+                        futures.append(executor.submit(process_chunk_balances, args))
                     
-                    # Process results as they complete
                     for future in as_completed(futures):
                         chunk_results = future.result()
-                        self.balances.update(chunk_results)
-                        del chunk_results
+                        batch_results.update(chunk_results)
                         processed_chunks += 1
                         pbar.update(1)
                     
-                    # Clean up
+                    if self.split_save:
+                        last_address = current_batch[-1][-1]
+                        self._save_split_results(batch_results, 'balances', last_address)
+                        batch_results = {}
+                    else:
+                        self.balances.update(batch_results)
+                    
+                    del futures
+
+    def calculate_velocities_parallel(self):
+        addresses = list(self.accounts.keys())
+        if not self.split_save:
+            np.random.shuffle(addresses)
+            
+        chunk_size = max(1, len(addresses) // self.n_chunks)
+        chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
+        
+        batch_results = {}
+        processed_chunks = 0
+        
+        with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
+            with tqdm(total=len(chunks), desc="Processing chunks") as pbar:
+                while processed_chunks < len(chunks):
+                    current_batch = chunks[processed_chunks:processed_chunks + self.n_cores]
+                    futures = []
+                    
+                    for i, chunk in enumerate(current_batch):
+                        accounts_chunk = {address: self.accounts[address] for address in chunk}
+                        args = (chunk, accounts_chunk, self.min_block_number, 
+                               self.save_every_n, self.LIMIT, i + 1)
+                        futures.append(executor.submit(process_chunk_velocities, args))
+                    
+                    for future in as_completed(futures):
+                        chunk_results = future.result()
+                        batch_results.update(chunk_results)
+                        processed_chunks += 1
+                        pbar.update(1)
+                    
+                    if self.split_save:
+                        last_address = current_batch[-1][-1]
+                        self._save_split_results(batch_results, 'velocities', last_address)
+                        batch_results = {}
+                    else:
+                        self.velocities.update(batch_results)
+                    
                     del futures
 
     def calculate_velocities(self):
@@ -306,23 +386,23 @@ class MicroVelocityAnalyzer:
                         self.accounts[address][0].pop(counter)
         self.velocities[address] = ind_velocity
 
-    def calculate_velocities_parallel(self):
-        addresses = list(self.accounts.keys())
-        np.random.shuffle(addresses) # Shuffle to distribute addresses with different number of transactions
-        chunk_size = max(1, len(addresses) // self.n_chunks)
-        chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
+    # def calculate_velocities_parallel(self):
+    #     addresses = list(self.accounts.keys())
+    #     np.random.shuffle(addresses) # Shuffle to distribute addresses with different number of transactions
+    #     chunk_size = max(1, len(addresses) // self.n_chunks)
+    #     chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
 
-        args_list = []
-        for i, chunk in enumerate(chunks):
-            accounts_chunk = {address: self.accounts[address] for address in chunk}
-            args_list.append((chunk, accounts_chunk, self.min_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
+    #     args_list = []
+    #     for i, chunk in enumerate(chunks):
+    #         accounts_chunk = {address: self.accounts[address] for address in chunk}
+    #         args_list.append((chunk, accounts_chunk, self.min_block_number, self.save_every_n, self.LIMIT, i%self.n_cores+1))
 
-        with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
-            futures = [executor.submit(process_chunk_velocities, args) for args in args_list]
+    #     with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
+    #         futures = [executor.submit(process_chunk_velocities, args) for args in args_list]
 
-            for future in tqdm(futures, position=0):
-                chunk_results = future.result()
-                self.velocities.update(chunk_results)
+    #         for future in tqdm(futures, position=0):
+    #             chunk_results = future.result()
+    #             self.velocities.update(chunk_results)
 
     def save_results(self):
         with open(self.output_file, 'wb') as file:
@@ -340,17 +420,38 @@ class MicroVelocityAnalyzer:
         self.backup_accounts = self.accounts.copy()
         print(f"Number of blocks considered: {self.LIMIT}")
         print("Calculating balances...")
-        if self.n_cores == 1:
-            self.calculate_balances()
-            print("Calculating velocities...")
-            self.calculate_velocities()
+        if self.split_save:
+            addresses = list(self.accounts.keys())
+            np.random.shuffle(addresses) # Shuffle to avoid having a few addresses with many transactions in the same chunk
+            chunk_size = max(1, len(addresses) // self.n_chunks)
+            chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
+
+            for chunk in chunks:
+
+                if self.n_cores == 1:
+                    self.calculate_balances_split()
+                    print("Calculating velocities...")
+                    self.calculate_velocities_split()
+                else:
+                    self.calculate_balances_parallel_split()
+                    print("Calculating velocities...")
+                    self.calculate_velocities_parallel_split()
+                print("Saving results...")
+                self.save_results_split()
+                print("Done!")
+
         else:
-            self.calculate_balances_parallel()
-            print("Calculating velocities...")
-            self.calculate_velocities_parallel()
-        print("Saving results...")
-        self.save_results()
-        print("Done!")
+            if self.n_cores == 1:
+                self.calculate_balances()
+                print("Calculating velocities...")
+                self.calculate_velocities()
+            else:
+                self.calculate_balances_parallel()
+                print("Calculating velocities...")
+                self.calculate_velocities_parallel()
+            print("Saving results...")
+            self.save_results()
+            print("Done!")
 
 def main():
     parser = argparse.ArgumentParser(description='Micro Velocity Analyzer')
@@ -360,6 +461,7 @@ def main():
     parser.add_argument('--save_every_n', type=int, default=1, help='Save every Nth position of the velocity array')
     parser.add_argument('--n_cores', type=int, default=1, help='Number of cores to use')
     parser.add_argument('--n_chunks', type=int, default=1, help='Number of chunks to split the data into (must be >= n_cores)')
+    parser.add_argument('--split_save', type=bool, default=False, help='Split the save into different files')
     args = parser.parse_args()
 
     analyzer = MicroVelocityAnalyzer(
@@ -368,7 +470,8 @@ def main():
         output_file=args.output_file,
         save_every_n=args.save_every_n,
         n_cores=args.n_cores,
-        n_chunks=args.n_chunks
+        n_chunks=args.n_chunks,
+        split_save=args.split_save
     )
     analyzer.run_analysis()
 
