@@ -461,7 +461,7 @@ def main():
     parser.add_argument('--save_every_n', type=int, default=1, help='Save every Nth position of the velocity array')
     parser.add_argument('--n_cores', type=int, default=1, help='Number of cores to use')
     parser.add_argument('--n_chunks', type=int, default=1, help='Number of chunks to split the data into (must be >= n_cores)')
-    parser.add_argument('--split_save', type=bool, action='store_true', default=False, help='Split the save into different files')
+    parser.add_argument('--split_save', action='store_true', default=False, help='Split the save into different files')
     args = parser.parse_args()
 
     analyzer = MicroVelocityAnalyzer(
