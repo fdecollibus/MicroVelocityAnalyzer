@@ -117,6 +117,7 @@ class MicroVelocityAnalyzer:
         self.n_cores = n_cores
         self.n_chunks = n_chunks
         self.split_save = split_save
+        self.batch_size = batch_size
         self.accounts = {}
         self.backup_accounts = {}
         self.min_block_number = float('inf')
