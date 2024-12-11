@@ -108,7 +108,8 @@ def process_chunk_velocities(args):
     return results
 
 class MicroVelocityAnalyzer:
-    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1, n_chunks=1, split_save=False):
+    def __init__(self, allocated_file, transfers_file, output_file='temp/general_velocities.pickle', save_every_n=1, n_cores=1, n_chunks=1, 
+                 split_save=False, batch_size=1):
         self.allocated_file = allocated_file
         self.transfers_file = transfers_file
         self.output_file = output_file
@@ -278,7 +279,7 @@ class MicroVelocityAnalyzer:
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             with tqdm(total=total_chunks, desc="Processing chunks") as pbar:
                 while processed_chunks < total_chunks:
-                    current_batch = chunks[processed_chunks:processed_chunks + self.n_cores]
+                    current_batch = chunks[processed_chunks:processed_chunks + self.n_cores*self.batch_size]
                     futures = []
                     
                     for i, chunk in enumerate(current_batch):
@@ -317,7 +318,7 @@ class MicroVelocityAnalyzer:
         with ProcessPoolExecutor(max_workers=self.n_cores) as executor:
             with tqdm(total=len(chunks), desc="Processing chunks") as pbar:
                 while processed_chunks < len(chunks):
-                    current_batch = chunks[processed_chunks:processed_chunks + self.n_cores]
+                    current_batch = chunks[processed_chunks:processed_chunks + self.n_cores*self.batch_size]
                     futures = []
                     
                     for i, chunk in enumerate(current_batch):
@@ -444,6 +445,7 @@ def main():
     parser.add_argument('--n_cores', type=int, default=1, help='Number of cores to use')
     parser.add_argument('--n_chunks', type=int, default=1, help='Number of chunks to split the data into (must be >= n_cores)')
     parser.add_argument('--split_save', action='store_true', default=False, help='Split the save into different files')
+    parser.add_argument('--batch_size', type=int, default=1, help='Number of chunks to process in a single batch')
     args = parser.parse_args()
 
     analyzer = MicroVelocityAnalyzer(
@@ -453,7 +455,8 @@ def main():
         save_every_n=args.save_every_n,
         n_cores=args.n_cores,
         n_chunks=args.n_chunks,
-        split_save=args.split_save
+        split_save=args.split_save,
+        batch_size=args.batch_size
     )
     analyzer.run_analysis()
 
