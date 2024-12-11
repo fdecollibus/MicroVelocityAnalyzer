@@ -405,8 +405,11 @@ class MicroVelocityAnalyzer:
     #             self.velocities.update(chunk_results)
 
     def save_results(self):
-        with open(self.output_file, 'wb') as file:
-            pickle.dump([self.backup_accounts,self.velocities, self.balances], file)
+        if self.split_save:
+            return
+        else:
+            with open(self.output_file, 'wb') as file:
+                pickle.dump([self.backup_accounts,self.velocities, self.balances], file)
 
     def run_analysis(self):
         print("Loading allocated data...",  self.allocated_file)
@@ -420,38 +423,17 @@ class MicroVelocityAnalyzer:
         self.backup_accounts = self.accounts.copy()
         print(f"Number of blocks considered: {self.LIMIT}")
         print("Calculating balances...")
-        if self.split_save:
-            addresses = list(self.accounts.keys())
-            np.random.shuffle(addresses) # Shuffle to avoid having a few addresses with many transactions in the same chunk
-            chunk_size = max(1, len(addresses) // self.n_chunks)
-            chunks = [addresses[i:(i + chunk_size)] for i in range(0, len(addresses), chunk_size)]
-
-            for chunk in chunks:
-
-                if self.n_cores == 1:
-                    self.calculate_balances_split()
-                    print("Calculating velocities...")
-                    self.calculate_velocities_split()
-                else:
-                    self.calculate_balances_parallel_split()
-                    print("Calculating velocities...")
-                    self.calculate_velocities_parallel_split()
-                print("Saving results...")
-                self.save_results_split()
-                print("Done!")
-
+        if self.n_cores == 1:
+            self.calculate_balances()
+            print("Calculating velocities...")
+            self.calculate_velocities()
         else:
-            if self.n_cores == 1:
-                self.calculate_balances()
-                print("Calculating velocities...")
-                self.calculate_velocities()
-            else:
-                self.calculate_balances_parallel()
-                print("Calculating velocities...")
-                self.calculate_velocities_parallel()
-            print("Saving results...")
-            self.save_results()
-            print("Done!")
+            self.calculate_balances_parallel()
+            print("Calculating velocities...")
+            self.calculate_velocities_parallel()
+        print("Saving results...")
+        self.save_results()
+        print("Done!")
 
 def main():
     parser = argparse.ArgumentParser(description='Micro Velocity Analyzer')
