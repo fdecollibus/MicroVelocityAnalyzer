@@ -288,7 +288,7 @@ class MicroVelocityAnalyzer:
                         args = (chunk, accounts_chunk, self.min_block_number, 
                                self.max_block_number, self.save_every_n, 
                                self.LIMIT, i + 1)
-                        futures.append(executor.submit(process_chunk_balances, args))
+                        futures.append(executor.submit(process_chunk_balances_v2, args))
                     
                     for future in as_completed(futures):
                         chunk_results = future.result()
